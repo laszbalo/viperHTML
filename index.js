@@ -81,11 +81,6 @@ function asHTML(html) {
   return {html: html};
 }
 
-// parse all comments at once and sanitize them
-function comments($0, $1, $2, $3) {
-  return $1 + $2.replace(FIND_ATTRIBUTES, sanitizeAttributes) + $3;
-}
-
 // instrument a wire to work asynchronously
 // passing along an optional resolved chunks
 // interceptor callback
@@ -103,11 +98,6 @@ function createAsync() {
     chunksReceiver = callback || String;
     return wire;
   };
-}
-
-// splice 0 - length an array and join its content
-function empty(array) {
-  return array.splice(0, array.length).join('');
 }
 
 // ensure String value and escape it
@@ -200,119 +190,10 @@ function asTemplateValue(value, isAttribute) {
   }
 }
 
-// sanitizes quotes around attributes
-function sanitizeAttributes($0, $1, $2) {
-  return $1 + ($2 || '"') + UID + ($2 || '"');
-}
-
 // weakly relate a generic object to a generic value
 function set(map, object, value) {
   map.set(object, value);
   return value;
-}
-
-// join a template via unique comment
-// look for comments in attributes and content
-// define updates to be invoked for this template
-// sanitize and clean the layout too
-function transform(template) {
-  var tagName = '';
-  var isCDATA = false;
-  var current = [];
-  var chunks = [];
-  var updates = [];
-  var content = new Parser({
-    onopentag: function (name, attributes) {
-      tagName = name;
-      current.push('<', name);
-      for (var key in attributes) {
-        if (attributes.hasOwnProperty(key)) {
-          var value = attributes[key];
-          var isPermutation = value === UID;
-          var isSpecial = SPECIAL_ATTRIBUTE.test(key);
-          var isEvent = isPermutation && ATTRIBUTE_EVENT.test(key);
-          if (isPermutation) {
-            if (isSpecial) {
-              if (isEvent) {
-                current.push(' ', key, '="');
-                updates.push(updateEvent);
-              } else {
-                updates.push(updateBoolean(key));
-              }
-            } else {
-              current.push(' ', key, '="');
-              updates.push(/style/i.test(key) ? updateStyle : updateAttribute);
-            }
-            chunks.push(empty(current));
-            if (!isSpecial || isEvent) current.push('"');
-          } else {
-            if (isSpecial && value.length === 0) {
-              current.push(' ', key);
-            } else {
-              var quote = value.indexOf('"') < 0 ? '"' : "'";
-              current.push(' ', key, '=', quote, value, quote);
-            }
-          }
-        }
-      }
-      current.push('>');
-    },
-    oncdatastart: function () {
-      current.push('<![CDATA[');
-      isCDATA = true;
-    },
-    oncdataend: function () {
-      current.push(']]>');
-      isCDATA = false;
-    },
-    onprocessinginstruction: function (name, data) {
-      current.push('<', data, '>');
-    },
-    onclosetag: function (name) {
-      if (!VOID_ELEMENT.test(name)) {
-        current.push('</', name, '>');
-      }
-      tagName = '';
-    },
-    ontext: function (text) {
-      var length = updates.length - 1;
-      switch (true) {
-        case isCDATA:
-        case /^code|input|textarea|pre$/i.test(tagName):
-          current.push(text);
-          break;
-        case /^script$/i.test(tagName):
-          current.push(minifyJS(text));
-          break;
-        case /^style$/i.test(tagName):
-          current.push(minifyCSS(text));
-          break;
-        default:
-          current.push(text);
-          break;
-      }
-    },
-    oncomment: function (data) {
-      if (data === UID) {
-        chunks.push(empty(current));
-        updates.push(getUpdateForHTML);
-      } else {
-        current.push('<!--' + data + '-->');
-      }
-    },
-    onend: function () {
-      chunks.push(empty(current));
-    }
-  }, {
-    decodeEntities: false,
-    xmlMode: true
-  });
-  content.write(template.join(UIDC).replace(NO, comments));
-  content.end();
-  return {
-    chunks: chunks,
-    updates: updates
-  };
 }
 
 // same as escape but specific for attributes
@@ -380,22 +261,6 @@ function updateEvent(value) {
     case 'object': return '';
     default: return escape(value || '');
   }
-}
-
-// -------------------------
-// Minifiers
-// -------------------------
-
-function minifyCSS() {
-  return csso.minify.apply(csso, arguments).css;
-}
-
-function minifyJS(code, options) {
-  var result = uglify.minify(code, Object.assign({
-    // uglify-js defaults
-    output: {comments: /^!/}
-  }, options));
-  return result.error ? code : result.code;
 }
 
 // -------------------------
@@ -511,12 +376,34 @@ function update() {
   return promise ? Promise.all(out).then(asBuffer) : asBuffer(out);
 }
 
+var updateMap = {
+  updateEvent,
+  updateBoolean,
+  updateStyle,
+  updateAttribute,
+  getUpdateForHTML
+};
+
+function setupUpdates({chunks, updates, template}) {
+  updates = updates.map(update => {
+    if(Array.isArray(update) && update[0] === 'updateBoolean') { // TODO: this context is right?
+      return updateMap[update[0]].apply(this, update.slice(1));
+    }
+    return updateMap[update];
+  });
+  return {
+    chunks,
+    updates,
+    template
+  };
+}
+
 // but the first time, it needs to be setup.
 // From now on, only update(tempalte) will be called
 // unless this context won't be used for other renderings.
 function upgrade(template) {
   var info = templates.get(template) ||
-      set(templates, template, transform(template));
+      set(templates, template, setupUpdates(templateInfo.get(template)));
   return {
     template: template,
     updates: fixUpdates.call(this, info.updates),
@@ -543,19 +430,12 @@ function createHyperComment() {
 
 var
   VOID_ELEMENT = /^(?:area|base|br|col|embed|hr|img|input|keygen|link|menuitem|meta|param|source|track|wbr)$/i,
-  UID = '_viperHTML: ' + require('crypto').randomBytes(16).toString('hex') + ';',
-  UIDC = '<!--' + UID + '-->',
-  ATTRIBUTE_EVENT = /^on\S+$/,
+  EXPANDO = '_viperHTML: ',
+  UID = EXPANDO + (Math.random() * new Date() | 0) + ';',
   JS_SHORTCUT = /^[a-z$_]\S*?\(/,
   JS_FUNCTION = /^function\S*?\(/,
-  SPECIAL_ATTRIBUTE = /^(?:(?:on|allow)[a-z]+|async|autofocus|autoplay|capture|checked|controls|default|defer|disabled|formnovalidate|hidden|ismap|itemscope|loop|multiple|muted|nomodule|novalidate|open|playsinline|readonly|required|reversed|selected|truespeed|typemustmatch|usecache)$/,
-  NO = /(<[a-z]+[a-z0-9:_-]*)((?:[^\S]+[a-z0-9:_-]+(?:=(?:'.*?'|".*?"|<.+?>|\S+))?)+)([^\S]*\/?>)/gi,
-  FIND_ATTRIBUTES = new RegExp('([^\\S][a-z]+[a-z0-9:_-]*=)([\'"]?)' + UIDC + '\\2', 'gi'),
   IS_NON_DIMENSIONAL = /acit|ex(?:s|g|n|p|$)|rph|ows|mnc|ntw|ine[ch]|zoo|^ord/i,
   hyphen = /([^A-Z])([A-Z]+)/g,
-  csso = require('csso'),
-  uglify = require("uglify-js"),
-  Parser = require('htmlparser2').Parser,
   htmlEscape = require('html-escaper').escape,
   templates = new WeakMap(),
   asyncs = new WeakMap(),
@@ -565,16 +445,12 @@ var
   transformers = {},
   transformersKeys = [],
   hyperComment = 0,
-  adoptable = false
+  adoptable = false,
+  templateInfo = require('./template-info')(UID)
 ;
 
 // traps function bind once (useful in destructuring)
 viper.bind = function bind(context) { return render.bind(context); };
-
-viper.minify = {
-  css: minifyCSS,
-  js: minifyJS
-};
 
 viper.define = function define(transformer, callback) {
   if (!(transformer in transformers)) {
