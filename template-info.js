@@ -51,9 +51,9 @@ module.exports = function templateInfo(UID) {
     uglify = require("uglify-js"),
     Parser = require('htmlparser2').Parser
     T = {},
-    TL = function (t) {
+    TL = function (t, intentAttributes) {
       var k = '_' + t.join('_');
-      return T[k] || (T[k] = Object.freeze(transform(t)));
+      return T[k] || (T[k] = Object.freeze(transform(t, intentAttributes)));
     }
   ;
   // join a template via unique comment
@@ -61,7 +61,7 @@ module.exports = function templateInfo(UID) {
   // define updates to be invoked for this template
   // sanitize and clean the layout too
 
-  function transform(template) {
+  function transform(template, intentAttributes) {
     var tagName = '';
     var isCDATA = false;
     var current = [];
@@ -87,7 +87,13 @@ module.exports = function templateInfo(UID) {
                   }
               } else {
                   current.push(' ', key, '="');
-                  updates.push(/style/i.test(key) ? 'updateStyle' : 'updateAttribute');
+                  updates.push(
+                    /style/i.test(key) ?
+                      'updateStyle' :
+                      (key in intentAttributes ?
+                        ['updateAttributeIntent', key] :
+                        'updateAttribute')
+                  );
               }
               chunks.push(empty(current));
               if (!isSpecial || isEvent) current.push('"');
@@ -162,8 +168,8 @@ module.exports = function templateInfo(UID) {
   }
 
   return {
-    get(template) { // returns the transform stuff
-      return TL(template)
+    get(template, intentAttributes) { // returns the transform stuff
+      return TL(template, intentAttributes)
     }
   }
 }

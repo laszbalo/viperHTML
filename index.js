@@ -201,6 +201,13 @@ function updateAttribute(s) {
   return htmlEscape(String(s));
 }
 
+function updateAttributeIntent(name) {
+  return function (any) {
+    var result = intentAttributes[name](null, any);
+    return result == null ? '' : htmlEscape(String(result));
+  };
+}
+
 // return the right callback to update a boolean attribute
 // after modifying the template to ignore such attribute if falsy
 function updateBoolean(name) {
@@ -381,12 +388,13 @@ var updateMap = {
   updateBoolean,
   updateStyle,
   updateAttribute,
-  getUpdateForHTML
+  getUpdateForHTML,
+  updateAttributeIntent
 };
 
 function setupUpdates({chunks, updates, template}) {
   updates = updates.map(update => {
-    if(Array.isArray(update) && update[0] === 'updateBoolean') { // TODO: this context is right?
+    if(Array.isArray(update)) { // TODO: this context is right?
       return updateMap[update[0]].apply(this, update.slice(1));
     }
     return updateMap[update];
@@ -403,7 +411,7 @@ function setupUpdates({chunks, updates, template}) {
 // unless this context won't be used for other renderings.
 function upgrade(template) {
   var info = templates.get(template) ||
-      set(templates, template, setupUpdates(templateInfo.get(template)));
+      set(templates, template, setupUpdates(templateInfo.get(template, intentAttributes)));
   return {
     template: template,
     updates: fixUpdates.call(this, info.updates),
@@ -442,6 +450,7 @@ var
   vipers = new WeakMap(),
   wires = new WeakMap(),
   isArray = Array.isArray,
+  intentAttributes = {},
   transformers = {},
   transformersKeys = [],
   hyperComment = 0,
@@ -453,11 +462,15 @@ var
 viper.bind = function bind(context) { return render.bind(context); };
 
 viper.define = function define(transformer, callback) {
-  if (!(transformer in transformers)) {
-    transformersKeys.push(transformer);
+  if (transformer.indexOf('-') < 0) {
+    if (!(transformer in transformers)) {
+      transformersKeys.push(transformer);
+    }
+    transformers[transformer] = callback;
+    // TODO: else throw ? console.warn ? who cares ?
+  } else {
+    intentAttributes[transformer] = callback;
   }
-  transformers[transformer] = callback;
-  // TODO: else throw ? console.warn ? who cares ?
 };
 
 Object.defineProperty(viper, 'adoptable', {
