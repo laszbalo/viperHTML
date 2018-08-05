@@ -1,3 +1,4 @@
+var UpdateTypes = require('./update-types');
 
 module.exports = function templateInfo(UID) {
 
@@ -81,18 +82,18 @@ module.exports = function templateInfo(UID) {
               if (isSpecial) {
                 if (isEvent) {
                   current.push(' ', key, '="');
-                  updates.push('updateEvent');
+                  updates.push(UpdateTypes.UPDATE_EVENT);
                 } else {
-                  updates.push(['updateBoolean', key]); // TODO: test this; updateBoolean referencing stuff fromt the lexical scope: e.g. UID
+                  updates.push([UpdateTypes.UPDATE_BOOLEAN, key]);
                   }
               } else {
                   current.push(' ', key, '="');
                   updates.push(
                     /style/i.test(key) ?
-                      'updateStyle' :
+                      UpdateTypes.UPDATE_STYLE :
                       (key in intentAttributes ?
-                        ['updateAttributeIntent', key] :
-                        'updateAttribute')
+                        [UpdateTypes.UPDATE_ATTRIBUTE_INTENT, key] :
+                        UpdateTypes.UPDATE_ATTRIBUTE)
                   );
               }
               chunks.push(empty(current));
@@ -147,7 +148,7 @@ module.exports = function templateInfo(UID) {
       oncomment: function (data) {
         if (data === UID) {
           chunks.push(empty(current));
-          updates.push('getUpdateForHTML');
+          updates.push(UpdateTypes.GET_UPDATE_FOR_HTML);
         } else {
           current.push('<!--' + data + '-->');
         }

@@ -383,14 +383,14 @@ function update() {
   return promise ? Promise.all(out).then(asBuffer) : asBuffer(out);
 }
 
-var updateMap = {
+var updateMap = [
   updateEvent,
   updateBoolean,
   updateStyle,
+  updateAttributeIntent,
   updateAttribute,
-  getUpdateForHTML,
-  updateAttributeIntent
-};
+  getUpdateForHTML
+];
 
 function setupUpdates({chunks, updates, template}) {
   updates = updates.map(update => {
@@ -455,7 +455,8 @@ var
   transformersKeys = [],
   hyperComment = 0,
   adoptable = false,
-  templateInfo = require('./template-info')(UID)
+  templateInfo = require('./template-info')(UID),
+  UpdateTypes = require('./update-types')
 ;
 
 // traps function bind once (useful in destructuring)
